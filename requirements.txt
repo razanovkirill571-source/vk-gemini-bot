@@ -1,3 +1,4 @@
 vk_api
 google-genai
+httpx[socks]
 requests
