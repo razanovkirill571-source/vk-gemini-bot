@@ -11,7 +11,9 @@ VK_GROUP_ID = int(os.environ["VK_GROUP_ID"])
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 MODEL_NAME = "gemini-3.8-flash"
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+PROXY_URL = os.environ.get("PROXY_URL", "")
+http_opts = types.HttpOptions(client_args={"proxy": PROXY_URL}) if PROXY_URL else None
+client = genai.Client(api_key=GEMINI_API_KEY, http_options=http_opts)
 
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
