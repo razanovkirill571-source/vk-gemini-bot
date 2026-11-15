@@ -12,7 +12,7 @@ VK_GROUP_ID = int(os.environ["VK_GROUP_ID"])
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
 MODEL_NAME = "gemini-4-hydrogen"
-FALLBACK_MODEL = "gemini-3.8-flash"
+FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"]
 
 PROXY_URL = os.environ.get("PROXY_URL", "")
 http_opts = types.HttpOptions(client_args={"proxy": PROXY_URL}) if PROXY_URL else None
@@ -40,29 +40,42 @@ def send_vk_message(peer_id, text):
         )
 
 
+def is_overloaded(err):
+    s = str(err).lower()
+    return "503" in s or "unavailable" in s or "overloaded" in s or "high demand" in s
+
+
 def ask_gemini_with_retry(user_id, contents):
     chat = get_chat(user_id)
     last_error = None
 
-    # До 3 попыток на основной модели gemini-4-hydrogen
-    for attempt in range(3):
+    # 2 попытки на основной модели gemini-4-hydrogen
+    for attempt in range(2):
         try:
             response = chat.send_message(contents)
             return response.text or "Модель вернула пустой ответ."
         except Exception as e:
             last_error = e
-            err_str = str(e)
-            if "503" in err_str or "UNAVAILABLE" in err_str or "overloaded" in err_str.lower():
-                time.sleep(2 * (attempt + 1))
+            if is_overloaded(e):
+                time.sleep(2)
                 continue
             raise
 
-    # Если после 3 попыток всё ещё 503 — отвечаем через запасную модель
-    fallback_resp = client.models.generate_content(
-        model=FALLBACK_MODEL,
-        contents=contents,
-    )
-    return fallback_resp.text or f"Ошибка при запросе к Gemini: {last_error}"
+    # По очереди пробуем запасные модели: 3.8-flash и 2.5-flash
+    for fallback_model in FALLBACK_MODELS:
+        try:
+            resp = client.models.generate_content(
+                model=fallback_model,
+                contents=contents,
+            )
+            return resp.text or "Модель вернула пустой ответ."
+        except Exception as e:
+            last_error = e
+            if is_overloaded(e):
+                continue
+            raise
+
+    raise last_error
 
 
 print("Бот запущен и слушает сообщения...", flush=True)
