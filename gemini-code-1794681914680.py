@@ -53,7 +53,8 @@ def ask_gemini_with_retry(user_id, contents):
     for attempt in range(2):
         try:
             response = chat.send_message(contents)
-            return response.text or "Модель вернула пустой ответ."
+            text_reply = response.text or "Модель вернула пустой ответ."
+            return f"{text_reply}\n\n[Модель: {MODEL_NAME}]"
         except Exception as e:
             last_error = e
             if is_overloaded(e):
@@ -68,7 +69,8 @@ def ask_gemini_with_retry(user_id, contents):
                 model=fallback_model,
                 contents=contents,
             )
-            return resp.text or "Модель вернула пустой ответ."
+            text_reply = resp.text or "Модель вернула пустой ответ."
+            return f"{text_reply}\n\n[Модель: {fallback_model}]"
         except Exception as e:
             last_error = e
             if is_overloaded(e):
