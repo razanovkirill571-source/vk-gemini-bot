@@ -14,9 +14,18 @@ GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 MODEL_NAME = "gemini-4-hydrogen"
 FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-2.5-flash"]
 
+SYSTEM_PROMPT = (
+    "Ты отвечаешь в мессенджере ВКонтакте, где НЕТ поддержки LaTeX и Markdown. "
+    "Никогда не пиши $, \\frac, \\cdot, ** и т.п. "
+    "Записывай дроби в три короткие строки (не длиннее 25 символов в строке, чтобы не переносились на телефоне): "
+    "числитель сверху, полоска из ───── посередине, знаменатель снизу; "
+    "для выравнивания используй неразрывный пробел. Степени пиши как x², x³."
+)
+
 PROXY_URL = os.environ.get("PROXY_URL", "")
 http_opts = types.HttpOptions(client_args={"proxy": PROXY_URL}) if PROXY_URL else None
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=http_opts)
+GEN_CONFIG = types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
 
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
@@ -27,7 +36,7 @@ user_chats = {}
 
 def get_chat(user_id):
     if user_id not in user_chats:
-        user_chats[user_id] = client.chats.create(model=MODEL_NAME)
+        user_chats[user_id] = client.chats.create(model=MODEL_NAME, config=GEN_CONFIG)
     return user_chats[user_id]
 
 
@@ -49,7 +58,6 @@ def ask_gemini_with_retry(user_id, contents):
     chat = get_chat(user_id)
     last_error = None
 
-    # 2 попытки на основной модели gemini-4-hydrogen
     for attempt in range(2):
         try:
             response = chat.send_message(contents)
@@ -62,12 +70,12 @@ def ask_gemini_with_retry(user_id, contents):
                 continue
             raise
 
-    # По очереди пробуем запасные модели: 3.8-flash и 2.5-flash
     for fallback_model in FALLBACK_MODELS:
         try:
             resp = client.models.generate_content(
                 model=fallback_model,
                 contents=contents,
+                config=GEN_CONFIG,
             )
             text_reply = resp.text or "Модель вернула пустой ответ."
             return f"{text_reply}\n\n[Модель: {fallback_model}]"
