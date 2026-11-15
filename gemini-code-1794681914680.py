@@ -1,5 +1,6 @@
 import os
 import random
+import time
 import requests
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
@@ -9,7 +10,9 @@ from google.genai import types
 VK_TOKEN = os.environ["VK_TOKEN"]
 VK_GROUP_ID = int(os.environ["VK_GROUP_ID"])
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-MODEL_NAME = "gemini-3.8-flash"
+
+MODEL_NAME = "gemini-4-hydrogen"
+FALLBACK_MODEL = "gemini-3.8-flash"
 
 PROXY_URL = os.environ.get("PROXY_URL", "")
 http_opts = types.HttpOptions(client_args={"proxy": PROXY_URL}) if PROXY_URL else None
@@ -37,7 +40,32 @@ def send_vk_message(peer_id, text):
         )
 
 
-print("Бот запущен и слушает сообщения...")
+def ask_gemini_with_retry(user_id, contents):
+    chat = get_chat(user_id)
+    last_error = None
+
+    # До 3 попыток на основной модели gemini-4-hydrogen
+    for attempt in range(3):
+        try:
+            response = chat.send_message(contents)
+            return response.text or "Модель вернула пустой ответ."
+        except Exception as e:
+            last_error = e
+            err_str = str(e)
+            if "503" in err_str or "UNAVAILABLE" in err_str or "overloaded" in err_str.lower():
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise
+
+    # Если после 3 попыток всё ещё 503 — отвечаем через запасную модель
+    fallback_resp = client.models.generate_content(
+        model=FALLBACK_MODEL,
+        contents=contents,
+    )
+    return fallback_resp.text or f"Ошибка при запросе к Gemini: {last_error}"
+
+
+print("Бот запущен и слушает сообщения...", flush=True)
 
 for event in longpoll.listen():
     if event.type != VkBotEventType.MESSAGE_NEW:
@@ -68,9 +96,7 @@ for event in longpoll.listen():
         continue
 
     try:
-        chat = get_chat(user_id)
-        response = chat.send_message(contents)
-        reply = response.text or "Модель вернула пустой ответ."
+        reply = ask_gemini_with_retry(user_id, contents)
         send_vk_message(peer_id, reply)
     except Exception as e:
         send_vk_message(peer_id, f"Ошибка при запросе к Gemini: {e}")
